@@ -1,0 +1,167 @@
+<?php
+// $Id$
+
+/**
+ * Main file for controlling the viewing of boxes through close-buttons
+ */
+
+//TODO: Limit this to enabled blocks
+//TODO: If cookies isn't set - should they be set from the logged in users db?
+//TODO: Clean up database when user is deleted
+//TODO: React upon the deletion of custom blocks
+//TODO: Make this javascript degrade nicely - that is - insert a link as well
+
+/**
+ * Implementation of hook_boot().
+ */
+function closeblock_boot() {
+  global $user;
+
+  if ($user->uid && !empty($_COOKIE['closeblock']) && is_array($_COOKIE['closeblock'])) {
+    $closeable_blocks = variable_get('closeblock_closeable', array());
+    foreach ($_COOKIE['closeblock'] as $block => $value) {
+      list($module, $delta) = explode('_', $block, 2);
+
+      $params = array(
+        ':uid'    => $user->uid,
+        ':module' => $module,
+        ':delta'  => $delta,
+      );
+
+      if (isset($closeable_blocks[$module]) && isset($closeable_blocks[$module][$delta]) && $closeable_blocks[$module][$delta]) {
+        $count = db_result(db_query("SELECT COUNT(*) FROM {closeblock} WHERE uid = %d AND module = '%s' AND delta = '%s'", $params));
+        if ($count == 0) {
+          db_query("INSERT INTO {closeblock} (uid, module, delta) VALUES (%d, '%s', '%s')", $params);
+        }
+      }
+
+      //TODO: Should we unset the cookie like this?
+      //setcookie('closeblock['. $block .']', '', time() - 3600);
+    }
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function closeblock_form_alter(&$form, $form_state, $form_id) {
+  if ($form_id === 'block_admin_configure') {
+    $module = $form['module']['#value'];
+    $delta  = $form['delta']['#value'];
+
+    $closeable_blocks = variable_get('closeblock_closeable', array());
+    $value = isset($closeable_blocks[$module]) && isset($closeable_blocks[$module][$delta]) ? $closeable_blocks[$module][$delta] : FALSE;
+
+    $form['user_vis_settings']['closedblock'] = array(
+      '#type' => 'checkbox',
+      '#default_value' => $value,
+      '#title' => t('Make closeable'),
+      '#description' => t('Should the user be able to close this block?'),
+    );
+    $form['#submit'][] = 'closeblock_block_admin_configure_submit';
+  }
+}
+
+function closeblock_block_admin_configure_submit($form, &$form_state) {
+  $module = $form_state['values']['module'];
+  $delta  = $form_state['values']['delta'];
+
+  $closeable_blocks = variable_get('closeblock_closeable', array());
+  if ($form_state['values']['closedblock']) {
+    if (isset($closeable_blocks[$module])) {
+      $closeable_blocks[$module][$delta] = TRUE;
+    }
+    else {
+      $closeable_blocks[$module] = array($delta => TRUE);
+    }
+    variable_set('closeblock_closeable', $closeable_blocks);
+  }
+  else if (isset($closeable_blocks[$module]) && isset($closeable_blocks[$module][$delta])) {
+    unset($closeable_blocks[$module][$delta]);
+    variable_set('closeblock_closeable', $closeable_blocks);
+  }
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function closeblock_theme() {
+  return array(
+    'blocks' => array(
+      'arguments' => array('region' => NULL),
+      'function'  => 'closeblock_blocks',
+    ),
+  );
+}
+
+function closeblock_list($region) {
+  static $closeblock;
+  global $user;
+
+  if ($list = block_list($region)) {
+    $js_setting = array();
+    $closeable_blocks = variable_get('closeblock_closeable', array());
+
+    if (!isset($closeblock)) {
+      $closeblock = array();
+      if ($user->uid) {
+        $blocks = db_query("SELECT module, delta FROM {closeblock} WHERE uid = %d", array(
+          ':uid' => $user->uid,
+        ));
+        while ($row = db_fetch_object($blocks)) {
+          if (isset($closeable_blocks[$row->module]) && isset($closeable_blocks[$row->module][$row->delta]) && $closeable_blocks[$row->module][$row->delta]) {
+            $closeblock[$row->module .'_'. $row->delta] = TRUE;
+          }
+        }
+      }
+      else if (isset($_COOKIE['closeblock']) && is_array($_COOKIE['closeblock'])) {
+        foreach ($_COOKIE['closeblock'] as $block => $value) {
+          //TODO: Exploding isn't really foolproof
+          list($module, $delta) = explode('_', $block, 2);
+          if (isset($closeable_blocks[$module]) && isset($closeable_blocks[$module][$delta]) && $closeable_blocks[$module][$delta]) {
+            $closeblock[$block] = TRUE;
+          }
+        }
+      }
+    }
+
+    foreach ($list as $block => $value) {
+      if (array_key_exists($block, $closeblock)) {
+        unset($list[$block]);
+      }
+      else {
+        list($module, $delta) = explode('_', $block, 2);
+        if (isset($closeable_blocks[$module]) && isset($closeable_blocks[$module][$delta]) && $closeable_blocks[$module][$delta]) {
+          $js_setting[] = $block;
+        }
+      }
+    }
+
+    if (!empty($js_setting)) {
+      drupal_add_js(array('closeblock' => $js_setting), 'setting');
+      drupal_add_js(drupal_get_path('module', 'closeblock') .'/closeblock.js');
+      drupal_add_js(drupal_get_path('module', 'closeblock') .'/jquery.cookies.2.0.1.min.js');
+    }
+  }
+
+  return $list;
+}
+
+/**
+ * Implementation of theme_blocks().
+ */
+function closeblock_blocks($region) {
+  $output = '';
+
+  if ($list = closeblock_list($region)) {
+    foreach ($list as $key => $block) {
+      // $key == <i>module</i>_<i>delta</i>
+      $output .= theme('block', $block);
+    }
+  }
+
+  // Add any content assigned to this region through drupal_set_content() calls.
+  $output .= drupal_get_content($region);
+
+  return $output;
+}

@@ -1,0 +1,4 @@
+; $Id$
+name = Close Block
+description = Makes it possible to easily hide blocks through a cookie
+core = 6.x

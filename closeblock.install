@@ -1,0 +1,60 @@
+<?php
+// $Id$
+
+/**
+ * Sets up the database for tracking of closed blocks
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+function closeblock_install() {
+  drupal_install_schema('closeblock');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function closeblock_uninstall() {
+  drupal_uninstall_schema('closeblock');
+  variable_del('closeblock_closeable');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function closeblock_schema() {
+  $schema = array();
+
+  $schema['closeblock'] = array(
+    'description' => 'Tracks which users has closed which blocks',
+    'fields' => array(
+      'uid' => array(
+        'type' => 'serial',
+        'unsigned'    => TRUE,
+        'not null'    => TRUE,
+        'description' => 'User ID.',
+      ),
+      'module' => array(
+        'type'        => 'varchar',
+        'length'      => 64,
+        'not null'    => TRUE,
+        'default'     => '',
+        'description' => "The module from which the block originates; for example, 'user' for the Who's Online block, and 'block' for any custom blocks.",
+      ),
+      'delta' => array(
+        'type'        => 'varchar',
+        'length'      => 32,
+        'not null'    => TRUE,
+        'default'     => '0',
+        'description' => 'Unique ID for block within a module.',
+      ),
+    ),
+    'indexes' => array(
+      'uid' => array('uid'),
+    ),
+    'primary key' => array('uid', 'module', 'delta'),
+  );
+
+  return $schema;
+}
